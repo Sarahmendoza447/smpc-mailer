@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: email-mailer
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: SHARED_API_KEY
+        sync: false
+      - key: MAIL_TRANSPORT
+        value: smtp
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: DEFAULT_FROM_NAME
+        value: Serendipity HR
+      - key: DEFAULT_REPLY_TO
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_ENCRYPTION
+        value: tls
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_TIMEOUT
+        value: "30"
+      - key: SMTP_EHLO_HOST
+        value: localhost
+      - key: RESEND_API_KEY
+        sync: false

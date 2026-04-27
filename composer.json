@@ -1,0 +1,7 @@
+{
+  "name": "serendipity/email-mailer",
+  "description": "Serendipity employee signup mailer",
+  "require": {
+    "phpmailer/phpmailer": "*"
+  }
+}
