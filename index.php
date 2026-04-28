@@ -594,42 +594,107 @@ function handleCompletePasswordReset(array $config, array $payload): void
         ]);
     }
 
-    $email = normalizeEmail($resetData['email']);
-    if ($email === '') {
+    $email = (string) ($resetData['email'] ?? '');
+    if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
         respond(400, [
             'success' => false,
             'error' => 'Invalid password reset link.',
         ]);
     }
 
-    $userResponse = supabaseRequest(
-        $supabaseUrl,
-        $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email) . '&select=user_id',
-        'GET'
-    );
+    $accountType = trim((string) ($resetData['account_type'] ?? ''));
+    $hashedPassword = normalizeBcryptHash(password_hash($newPassword, PASSWORD_BCRYPT));
+    $targetTable = '';
+    $idColumn = '';
+    $recordId = null;
+    $updateResponse = null;
 
-    if ($userResponse['status'] !== 200 || empty($userResponse['json'][0]) || !is_array($userResponse['json'][0])) {
+    if ($accountType === 'admin' || $accountType === '') {
+        $adminResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/admin_credentials?email=ilike.' . urlencode($email) . '&select=admin_id',
+            'GET'
+        );
+
+        if ($adminResponse['status'] === 200 && !empty($adminResponse['json'][0]) && is_array($adminResponse['json'][0])) {
+            $recordId = $adminResponse['json'][0]['admin_id'] ?? null;
+            if ($recordId !== null && $recordId !== '') {
+                $targetTable = 'admin_credentials';
+                $idColumn = 'admin_id';
+                $updateResponse = supabaseRequest(
+                    $supabaseUrl,
+                    $serviceRoleKey,
+                    '/rest/v1/admin_credentials?admin_id=eq.' . urlencode((string) $recordId),
+                    'PATCH',
+                    ['password' => $hashedPassword],
+                    ['Prefer: return=representation']
+                );
+            }
+        }
+    }
+
+    if ($updateResponse === null) {
+        $userResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/users?email=ilike.' . urlencode($email) . '&select=user_id',
+            'GET'
+        );
+
+        if ($userResponse['status'] === 200 && !empty($userResponse['json'][0]) && is_array($userResponse['json'][0])) {
+            $recordId = $userResponse['json'][0]['user_id'] ?? null;
+            if ($recordId !== null && $recordId !== '') {
+                $targetTable = 'users';
+                $idColumn = 'user_id';
+                $updateResponse = supabaseRequest(
+                    $supabaseUrl,
+                    $serviceRoleKey,
+                    '/rest/v1/users?user_id=eq.' . urlencode((string) $recordId),
+                    'PATCH',
+                    ['password' => $hashedPassword],
+                    ['Prefer: return=representation']
+                );
+            }
+        }
+    }
+
+    if ($updateResponse === null || $targetTable === '' || $idColumn === '') {
         respond(404, [
             'success' => false,
             'error' => 'No account found for this reset link.',
         ]);
     }
 
-    $hashedPassword = normalizeBcryptHash(password_hash($newPassword, PASSWORD_BCRYPT));
-
-    $updateResponse = supabaseRequest(
-        $supabaseUrl,
-        $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email),
-        'PATCH',
-        ['password' => $hashedPassword],
-        ['Prefer: return=representation']
-    );
-
     if ($updateResponse['status'] < 200 || $updateResponse['status'] >= 300) {
         respondSupabaseError($updateResponse, 'Failed to update the password.');
     }
+
+    if (!is_array($updateResponse['json']) || count($updateResponse['json']) === 0) {
+        respond(500, [
+            'success' => false,
+            'error' => 'Password reset did not update any account record.',
+        ]);
+    }
+
+    $storedPassword = $updateResponse['json'][0]['password'] ?? null;
+    if ($storedPassword !== $hashedPassword) {
+        $verificationResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/' . $targetTable . '?' . $idColumn . '=eq.' . urlencode((string) $recordId) . '&select=password',
+            'GET'
+        );
+
+        if ($verificationResponse['status'] !== 200 || empty($verificationResponse['json'][0]) || !is_array($verificationResponse['json'][0]) || ($verificationResponse['json'][0]['password'] ?? null) !== $hashedPassword) {
+            respond(500, [
+                'success' => false,
+                'error' => 'Password reset failed, password was not persisted correctly.',
+            ]);
+        }
+    }
+
+    error_log($targetTable . ' password updated successfully for ' . $idColumn . '=' . $recordId . ' (email=' . $email . ')');
 
     respond(200, [
         'success' => true,
@@ -649,22 +714,41 @@ function handleForgotPassword(array $config, array $payload): void
         ]);
     }
 
-    $email = normalizeEmail($payload['email'] ?? '');
-    if ($email === '') {
+    $email = (string) ($payload['email'] ?? '');
+    if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
         respond(400, [
             'success' => false,
-            'error' => 'Email is required for password reset.',
+            'error' => 'A valid email is required for password reset.',
         ]);
     }
 
-    $userResponse = supabaseRequest(
+    $adminResponse = supabaseRequest(
         $supabaseUrl,
         $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email) . '&select=user_id,employee_id,email',
+        '/rest/v1/admin_credentials?email=ilike.' . urlencode($email) . '&select=admin_id,email',
         'GET'
     );
 
-    if ($userResponse['status'] !== 200 || empty($userResponse['json'][0]) || !is_array($userResponse['json'][0])) {
+    $accountType = '';
+    if ($adminResponse['status'] === 200 && !empty($adminResponse['json'][0]) && is_array($adminResponse['json'][0])) {
+        $accountType = 'admin';
+    }
+
+    $userResponse = null;
+    if ($accountType === '') {
+        $userResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/users?email=ilike.' . urlencode($email) . '&select=user_id,email',
+            'GET'
+        );
+
+        if ($userResponse['status'] === 200 && !empty($userResponse['json'][0]) && is_array($userResponse['json'][0])) {
+            $accountType = 'user';
+        }
+    }
+
+    if ($accountType === '') {
         // Keep the response generic for security.
         respond(200, [
             'success' => true,
@@ -674,10 +758,11 @@ function handleForgotPassword(array $config, array $payload): void
 
     $resetToken = generatePasswordResetToken([
         'email' => $email,
+        'account_type' => $accountType,
     ], $config['shared_api_key']);
 
     try {
-        sendPasswordResetEmail($config, $email, $resetToken);
+        sendPasswordResetEmail($config, $email, $resetToken, $accountType);
     } catch (Throwable $exception) {
         respond(500, [
             'success' => false,
@@ -702,11 +787,12 @@ function generateTemporaryPassword(int $length = 12): string
     return $password;
 }
 
-function sendPasswordResetEmail(array $config, string $email, string $resetToken): void
+function sendPasswordResetEmail(array $config, string $email, string $resetToken, string $accountType = 'admin'): void
 {
     $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
-    $resetUrl = $frontendBaseUrl . '/?reset_token=' . urlencode($resetToken);
-    $subject = 'Serendipity Password Reset';
+    $resetPath = $accountType === 'user' ? '/reset-password?token=' : '/admin-reset-password?token=';
+    $resetUrl = $frontendBaseUrl . $resetPath . urlencode($resetToken);
+    $subject = $accountType === 'user' ? 'Serendipity Password Reset' : 'Serendipity Admin Password Reset';
     $text = "A password reset request was received for your account.\n\n"
         . "Use the link below to reset your password:\n\n"
         . "{$resetUrl}\n\n"
@@ -817,8 +903,8 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
         . '<p>Your employee portal account has been created successfully.</p>'
         . '<p><strong>Employee ID:</strong> ' . escapeHtml((string) $employee['employee_id']) . '<br>'
         . '<strong>Email:</strong> ' . escapeHtml($employee['email']) . '</p>'
-        . '<p>You can now sign in to the Serendipity Employee Portal.</p>'
-        . '<p><a href="' . escapeHtml($dashboardUrl) . '" style="display:inline-block;padding:12px 18px;background:#2f8f3a;color:#ffffff;text-decoration:none;border-radius:8px;">Open Employee Portal</a></p>'
+        . '<p>You can now sign in to the 👤 Serendipity Employee Portal.</p>'
+        . '<p><a href="' . escapeHtml($dashboardUrl) . '" style="display:inline-block;padding:12px 18px;background:#2f8f3a;color:#ffffff;text-decoration:none;border-radius:8px;">👤 Open Employee Portal</a></p>'
         . '<p style="color:#6b7280;font-size:14px;">If you did not request this signup, please contact Serendipity HR.</p>'
         . '</div>';
 
@@ -826,7 +912,7 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
         . "Your employee portal account has been created successfully.\n"
         . "Employee ID: {$employee['employee_id']}\n"
         . "Email: {$employee['email']}\n\n"
-        . "You can now sign in at {$dashboardUrl}\n\n"
+        . "👤 You can now sign in at {$dashboardUrl}\n\n"
         . "If you did not request this signup, please contact Serendipity HR.";
 
     $transport = strtolower(trim((string) ($config['transport'] ?? 'smtp')));
