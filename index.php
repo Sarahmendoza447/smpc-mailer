@@ -789,7 +789,7 @@ function generateTemporaryPassword(int $length = 12): string
 
 function sendPasswordResetEmail(array $config, string $email, string $resetToken, string $accountType = 'admin'): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
+    $frontendBaseUrl = frontendBaseUrlForAccount($config, $accountType);
     $resetPath = $accountType === 'user' ? '/reset-password?token=' : '/?reset_token=';
     $resetUrl = $frontendBaseUrl . $resetPath . urlencode($resetToken);
     $subject = $accountType === 'user' ? 'Serendipity Password Reset' : 'Serendipity Admin Password Reset';
@@ -839,7 +839,7 @@ function sendPasswordResetEmail(array $config, string $email, string $resetToken
 
 function sendSignupVerificationEmail(array $config, array $data): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
+    $frontendBaseUrl = employeeFrontendBaseUrl($config);
     $verificationUrl = $frontendBaseUrl . '/?verify_token=' . urlencode($data['token'] ?? '');
     $subject = 'Verify your Serendipity account';
     $html = '<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;line-height:1.6;">'
@@ -892,7 +892,7 @@ function sendSignupVerificationEmail(array $config, array $data): void
 
 function sendSignupConfirmationEmail(array $config, array $employee): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
+    $frontendBaseUrl = employeeFrontendBaseUrl($config);
     $fullName = trim($employee['first_name'] . ' ' . $employee['last_name']);
     $dashboardUrl = $frontendBaseUrl !== '' ? $frontendBaseUrl : 'http://localhost:5173';
     $subject = 'Welcome to Serendipity Employee Portal';
@@ -1164,6 +1164,27 @@ function escapeHtml(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
+function frontendBaseUrlForAccount(array $config, string $accountType): string
+{
+    return $accountType === 'user' ? employeeFrontendBaseUrl($config) : adminFrontendBaseUrl($config);
+}
+
+function employeeFrontendBaseUrl(array $config): string
+{
+    return normalizeFrontendBaseUrl($config['employee_frontend_base_url'] ?? ($config['frontend_base_url'] ?? 'http://localhost:5173'));
+}
+
+function adminFrontendBaseUrl(array $config): string
+{
+    return normalizeFrontendBaseUrl($config['admin_frontend_base_url'] ?? ($config['frontend_base_url'] ?? 'http://localhost:5173'));
+}
+
+function normalizeFrontendBaseUrl($value): string
+{
+    $url = rtrim(trim((string) $value), '/');
+    return $url !== '' ? $url : 'http://localhost:5173';
+}
+
 function respond(int $statusCode, array $payload): void
 {
     http_response_code($statusCode);
@@ -1183,13 +1204,19 @@ function loadConfig(): array
         }
     }
 
+    $frontendBaseUrl = envValue('FRONTEND_BASE_URL', (string) ($fileConfig['frontend_base_url'] ?? 'http://localhost:5173'));
+    $employeeFrontendBaseUrl = envValue('EMPLOYEE_FRONTEND_BASE_URL', (string) ($fileConfig['employee_frontend_base_url'] ?? $frontendBaseUrl));
+    $adminFrontendBaseUrl = envValue('ADMIN_FRONTEND_BASE_URL', (string) ($fileConfig['admin_frontend_base_url'] ?? $frontendBaseUrl));
+
     return [
         'shared_api_key' => envValue('SHARED_API_KEY', (string) ($fileConfig['shared_api_key'] ?? '')),
         'transport' => strtolower(envValue('MAIL_TRANSPORT', (string) ($fileConfig['transport'] ?? 'smtp'))),
         'default_from_email' => envValue('DEFAULT_FROM_EMAIL', (string) ($fileConfig['default_from_email'] ?? '')),
         'default_from_name' => envValue('DEFAULT_FROM_NAME', (string) ($fileConfig['default_from_name'] ?? 'Serendipity HR')),
         'default_reply_to' => envValue('DEFAULT_REPLY_TO', (string) ($fileConfig['default_reply_to'] ?? '')),
-        'frontend_base_url' => envValue('FRONTEND_BASE_URL', (string) ($fileConfig['frontend_base_url'] ?? 'http://localhost:5173')),
+        'frontend_base_url' => $frontendBaseUrl,
+        'employee_frontend_base_url' => $employeeFrontendBaseUrl,
+        'admin_frontend_base_url' => $adminFrontendBaseUrl,
         'allowed_origins' => envCsvList('ALLOWED_ORIGINS', $fileConfig['allowed_origins'] ?? ['*']),
         'supabase' => [
             'url' => envValue('SUPABASE_URL', (string) (($fileConfig['supabase']['url'] ?? ''))),
