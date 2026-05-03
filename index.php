@@ -594,42 +594,107 @@ function handleCompletePasswordReset(array $config, array $payload): void
         ]);
     }
 
-    $email = normalizeEmail($resetData['email']);
-    if ($email === '') {
+    $email = (string) ($resetData['email'] ?? '');
+    if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
         respond(400, [
             'success' => false,
             'error' => 'Invalid password reset link.',
         ]);
     }
 
-    $userResponse = supabaseRequest(
-        $supabaseUrl,
-        $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email) . '&select=user_id',
-        'GET'
-    );
+    $accountType = trim((string) ($resetData['account_type'] ?? ''));
+    $hashedPassword = normalizeBcryptHash(password_hash($newPassword, PASSWORD_BCRYPT));
+    $targetTable = '';
+    $idColumn = '';
+    $recordId = null;
+    $updateResponse = null;
 
-    if ($userResponse['status'] !== 200 || empty($userResponse['json'][0]) || !is_array($userResponse['json'][0])) {
+    if ($accountType === 'admin' || $accountType === '') {
+        $adminResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/admin_credentials?email=ilike.' . urlencode($email) . '&select=admin_id',
+            'GET'
+        );
+
+        if ($adminResponse['status'] === 200 && !empty($adminResponse['json'][0]) && is_array($adminResponse['json'][0])) {
+            $recordId = $adminResponse['json'][0]['admin_id'] ?? null;
+            if ($recordId !== null && $recordId !== '') {
+                $targetTable = 'admin_credentials';
+                $idColumn = 'admin_id';
+                $updateResponse = supabaseRequest(
+                    $supabaseUrl,
+                    $serviceRoleKey,
+                    '/rest/v1/admin_credentials?admin_id=eq.' . urlencode((string) $recordId),
+                    'PATCH',
+                    ['password' => $hashedPassword],
+                    ['Prefer: return=representation']
+                );
+            }
+        }
+    }
+
+    if ($updateResponse === null) {
+        $userResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/users?email=ilike.' . urlencode($email) . '&select=user_id',
+            'GET'
+        );
+
+        if ($userResponse['status'] === 200 && !empty($userResponse['json'][0]) && is_array($userResponse['json'][0])) {
+            $recordId = $userResponse['json'][0]['user_id'] ?? null;
+            if ($recordId !== null && $recordId !== '') {
+                $targetTable = 'users';
+                $idColumn = 'user_id';
+                $updateResponse = supabaseRequest(
+                    $supabaseUrl,
+                    $serviceRoleKey,
+                    '/rest/v1/users?user_id=eq.' . urlencode((string) $recordId),
+                    'PATCH',
+                    ['password' => $hashedPassword],
+                    ['Prefer: return=representation']
+                );
+            }
+        }
+    }
+
+    if ($updateResponse === null || $targetTable === '' || $idColumn === '') {
         respond(404, [
             'success' => false,
             'error' => 'No account found for this reset link.',
         ]);
     }
 
-    $hashedPassword = normalizeBcryptHash(password_hash($newPassword, PASSWORD_BCRYPT));
-
-    $updateResponse = supabaseRequest(
-        $supabaseUrl,
-        $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email),
-        'PATCH',
-        ['password' => $hashedPassword],
-        ['Prefer: return=representation']
-    );
-
     if ($updateResponse['status'] < 200 || $updateResponse['status'] >= 300) {
         respondSupabaseError($updateResponse, 'Failed to update the password.');
     }
+
+    if (!is_array($updateResponse['json']) || count($updateResponse['json']) === 0) {
+        respond(500, [
+            'success' => false,
+            'error' => 'Password reset did not update any account record.',
+        ]);
+    }
+
+    $storedPassword = $updateResponse['json'][0]['password'] ?? null;
+    if ($storedPassword !== $hashedPassword) {
+        $verificationResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/' . $targetTable . '?' . $idColumn . '=eq.' . urlencode((string) $recordId) . '&select=password',
+            'GET'
+        );
+
+        if ($verificationResponse['status'] !== 200 || empty($verificationResponse['json'][0]) || !is_array($verificationResponse['json'][0]) || ($verificationResponse['json'][0]['password'] ?? null) !== $hashedPassword) {
+            respond(500, [
+                'success' => false,
+                'error' => 'Password reset failed, password was not persisted correctly.',
+            ]);
+        }
+    }
+
+    error_log($targetTable . ' password updated successfully for ' . $idColumn . '=' . $recordId . ' (email=' . $email . ')');
 
     respond(200, [
         'success' => true,
@@ -649,22 +714,41 @@ function handleForgotPassword(array $config, array $payload): void
         ]);
     }
 
-    $email = normalizeEmail($payload['email'] ?? '');
-    if ($email === '') {
+    $email = (string) ($payload['email'] ?? '');
+    if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
         respond(400, [
             'success' => false,
-            'error' => 'Email is required for password reset.',
+            'error' => 'A valid email is required for password reset.',
         ]);
     }
 
-    $userResponse = supabaseRequest(
+    $adminResponse = supabaseRequest(
         $supabaseUrl,
         $serviceRoleKey,
-        '/rest/v1/users?email=eq.' . urlencode($email) . '&select=user_id,employee_id,email',
+        '/rest/v1/admin_credentials?email=ilike.' . urlencode($email) . '&select=admin_id,email',
         'GET'
     );
 
-    if ($userResponse['status'] !== 200 || empty($userResponse['json'][0]) || !is_array($userResponse['json'][0])) {
+    $accountType = '';
+    if ($adminResponse['status'] === 200 && !empty($adminResponse['json'][0]) && is_array($adminResponse['json'][0])) {
+        $accountType = 'admin';
+    }
+
+    $userResponse = null;
+    if ($accountType === '') {
+        $userResponse = supabaseRequest(
+            $supabaseUrl,
+            $serviceRoleKey,
+            '/rest/v1/users?email=ilike.' . urlencode($email) . '&select=user_id,email',
+            'GET'
+        );
+
+        if ($userResponse['status'] === 200 && !empty($userResponse['json'][0]) && is_array($userResponse['json'][0])) {
+            $accountType = 'user';
+        }
+    }
+
+    if ($accountType === '') {
         // Keep the response generic for security.
         respond(200, [
             'success' => true,
@@ -674,10 +758,11 @@ function handleForgotPassword(array $config, array $payload): void
 
     $resetToken = generatePasswordResetToken([
         'email' => $email,
+        'account_type' => $accountType,
     ], $config['shared_api_key']);
 
     try {
-        sendPasswordResetEmail($config, $email, $resetToken);
+        sendPasswordResetEmail($config, $email, $resetToken, $accountType);
     } catch (Throwable $exception) {
         respond(500, [
             'success' => false,
@@ -702,11 +787,12 @@ function generateTemporaryPassword(int $length = 12): string
     return $password;
 }
 
-function sendPasswordResetEmail(array $config, string $email, string $resetToken): void
+function sendPasswordResetEmail(array $config, string $email, string $resetToken, string $accountType = 'admin'): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
-    $resetUrl = $frontendBaseUrl . '/?reset_token=' . urlencode($resetToken);
-    $subject = 'Serendipity Password Reset';
+    $frontendBaseUrl = frontendBaseUrlForAccount($config, $accountType);
+    $resetPath = $accountType === 'user' ? '/reset-password?token=' : '/?reset_token=';
+    $resetUrl = $frontendBaseUrl . $resetPath . urlencode($resetToken);
+    $subject = $accountType === 'user' ? 'Serendipity Password Reset' : 'Serendipity Admin Password Reset';
     $text = "A password reset request was received for your account.\n\n"
         . "Use the link below to reset your password:\n\n"
         . "{$resetUrl}\n\n"
@@ -753,7 +839,7 @@ function sendPasswordResetEmail(array $config, string $email, string $resetToken
 
 function sendSignupVerificationEmail(array $config, array $data): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
+    $frontendBaseUrl = frontendBaseUrlForAccount($config, 'user');
     $verificationUrl = $frontendBaseUrl . '/?verify_token=' . urlencode($data['token'] ?? '');
     $subject = 'Verify your Serendipity account';
     $html = '<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;line-height:1.6;">'
@@ -806,7 +892,7 @@ function sendSignupVerificationEmail(array $config, array $data): void
 
 function sendSignupConfirmationEmail(array $config, array $employee): void
 {
-    $frontendBaseUrl = rtrim(trim((string) ($config['frontend_base_url'] ?? 'http://localhost:5173')), '/');
+    $frontendBaseUrl = frontendBaseUrlForAccount($config, 'user');
     $fullName = trim($employee['first_name'] . ' ' . $employee['last_name']);
     $dashboardUrl = $frontendBaseUrl !== '' ? $frontendBaseUrl : 'http://localhost:5173';
     $subject = 'Welcome to Serendipity Employee Portal';
@@ -817,8 +903,8 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
         . '<p>Your employee portal account has been created successfully.</p>'
         . '<p><strong>Employee ID:</strong> ' . escapeHtml((string) $employee['employee_id']) . '<br>'
         . '<strong>Email:</strong> ' . escapeHtml($employee['email']) . '</p>'
-        . '<p>You can now sign in to the Serendipity Employee Portal.</p>'
-        . '<p><a href="' . escapeHtml($dashboardUrl) . '" style="display:inline-block;padding:12px 18px;background:#2f8f3a;color:#ffffff;text-decoration:none;border-radius:8px;">Open Employee Portal</a></p>'
+        . '<p>You can now sign in to the 👤 Serendipity Employee Portal.</p>'
+        . '<p><a href="' . escapeHtml($dashboardUrl) . '" style="display:inline-block;padding:12px 18px;background:#2f8f3a;color:#ffffff;text-decoration:none;border-radius:8px;">👤 Open Employee Portal</a></p>'
         . '<p style="color:#6b7280;font-size:14px;">If you did not request this signup, please contact Serendipity HR.</p>'
         . '</div>';
 
@@ -826,7 +912,7 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
         . "Your employee portal account has been created successfully.\n"
         . "Employee ID: {$employee['employee_id']}\n"
         . "Email: {$employee['email']}\n\n"
-        . "You can now sign in at {$dashboardUrl}\n\n"
+        . "👤 You can now sign in at {$dashboardUrl}\n\n"
         . "If you did not request this signup, please contact Serendipity HR.";
 
     $transport = strtolower(trim((string) ($config['transport'] ?? 'smtp')));
@@ -1078,6 +1164,67 @@ function escapeHtml(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
+function frontendBaseUrlForAccount(array $config, string $accountType): string
+{
+    $originBaseUrl = frontendBaseUrlFromRequestOrigin($config, $accountType);
+    if ($originBaseUrl !== null) {
+        return $originBaseUrl;
+    }
+
+    return $accountType === 'user' ? employeeFrontendBaseUrl($config) : adminFrontendBaseUrl($config);
+}
+
+function frontendBaseUrlFromRequestOrigin(array $config, string $accountType): ?string
+{
+    $origin = normalizeOptionalFrontendBaseUrl($_SERVER['HTTP_ORIGIN'] ?? '');
+    if ($origin === '') {
+        return null;
+    }
+
+    $localUrls = $accountType === 'user'
+        ? [
+            $config['employee_local_frontend_base_url'] ?? '',
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+        ]
+        : [
+            $config['admin_local_frontend_base_url'] ?? '',
+            'http://localhost:5174',
+            'http://127.0.0.1:5174',
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+        ];
+
+    return in_array($origin, normalizeFrontendBaseUrlList($localUrls), true) ? $origin : null;
+}
+
+function employeeFrontendBaseUrl(array $config): string
+{
+    return normalizeFrontendBaseUrl($config['employee_frontend_base_url'] ?? ($config['frontend_base_url'] ?? 'http://localhost:5173'));
+}
+
+function adminFrontendBaseUrl(array $config): string
+{
+    return normalizeFrontendBaseUrl($config['admin_frontend_base_url'] ?? ($config['frontend_base_url'] ?? 'http://localhost:5173'));
+}
+
+function normalizeFrontendBaseUrl($value): string
+{
+    $url = normalizeOptionalFrontendBaseUrl($value);
+    return $url !== '' ? $url : 'http://localhost:5173';
+}
+
+function normalizeOptionalFrontendBaseUrl($value): string
+{
+    return rtrim(trim((string) $value), '/');
+}
+
+function normalizeFrontendBaseUrlList(array $values): array
+{
+    $urls = array_map('normalizeOptionalFrontendBaseUrl', $values);
+    return array_values(array_filter($urls, static fn (string $url): bool => $url !== ''));
+}
+
 function respond(int $statusCode, array $payload): void
 {
     http_response_code($statusCode);
@@ -1097,13 +1244,23 @@ function loadConfig(): array
         }
     }
 
+    $frontendBaseUrl = envValue('FRONTEND_BASE_URL', (string) ($fileConfig['frontend_base_url'] ?? 'http://localhost:5173'));
+    $employeeFrontendBaseUrl = envValue('EMPLOYEE_FRONTEND_BASE_URL', (string) ($fileConfig['employee_frontend_base_url'] ?? $frontendBaseUrl));
+    $adminFrontendBaseUrl = envValue('ADMIN_FRONTEND_BASE_URL', (string) ($fileConfig['admin_frontend_base_url'] ?? $frontendBaseUrl));
+    $employeeLocalFrontendBaseUrl = envValue('EMPLOYEE_LOCAL_FRONTEND_BASE_URL', (string) ($fileConfig['employee_local_frontend_base_url'] ?? 'http://localhost:5173'));
+    $adminLocalFrontendBaseUrl = envValue('ADMIN_LOCAL_FRONTEND_BASE_URL', (string) ($fileConfig['admin_local_frontend_base_url'] ?? 'http://localhost:5174'));
+
     return [
         'shared_api_key' => envValue('SHARED_API_KEY', (string) ($fileConfig['shared_api_key'] ?? '')),
         'transport' => strtolower(envValue('MAIL_TRANSPORT', (string) ($fileConfig['transport'] ?? 'smtp'))),
         'default_from_email' => envValue('DEFAULT_FROM_EMAIL', (string) ($fileConfig['default_from_email'] ?? '')),
         'default_from_name' => envValue('DEFAULT_FROM_NAME', (string) ($fileConfig['default_from_name'] ?? 'Serendipity HR')),
         'default_reply_to' => envValue('DEFAULT_REPLY_TO', (string) ($fileConfig['default_reply_to'] ?? '')),
-        'frontend_base_url' => envValue('FRONTEND_BASE_URL', (string) ($fileConfig['frontend_base_url'] ?? 'http://localhost:5173')),
+        'frontend_base_url' => $frontendBaseUrl,
+        'employee_frontend_base_url' => $employeeFrontendBaseUrl,
+        'admin_frontend_base_url' => $adminFrontendBaseUrl,
+        'employee_local_frontend_base_url' => $employeeLocalFrontendBaseUrl,
+        'admin_local_frontend_base_url' => $adminLocalFrontendBaseUrl,
         'allowed_origins' => envCsvList('ALLOWED_ORIGINS', $fileConfig['allowed_origins'] ?? ['*']),
         'supabase' => [
             'url' => envValue('SUPABASE_URL', (string) (($fileConfig['supabase']['url'] ?? ''))),
