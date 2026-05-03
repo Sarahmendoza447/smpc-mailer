@@ -16,12 +16,16 @@ services:
         value: Serendipity HR
       - key: DEFAULT_REPLY_TO
         sync: false
-      - key: FRONTEND_BASE_URL
-        sync: false
       - key: EMPLOYEE_FRONTEND_BASE_URL
         value: https://serendipity-smpc.vercel.app
       - key: ADMIN_FRONTEND_BASE_URL
         value: https://serendipity-smpc-admin.vercel.app
+      - key: FRONTEND_BASE_URL
+        value: https://serendipity-smpc.vercel.app
+      - key: EMPLOYEE_LOCAL_FRONTEND_BASE_URL
+        value: http://localhost:5173
+      - key: ADMIN_LOCAL_FRONTEND_BASE_URL
+        value: http://localhost:5174
       - key: ALLOWED_ORIGINS
         sync: false
       - key: SUPABASE_URL
