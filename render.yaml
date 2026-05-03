@@ -9,7 +9,7 @@ services:
       - key: SHARED_API_KEY
         sync: false
       - key: MAIL_TRANSPORT
-        value: smtp
+        value: resend
       - key: DEFAULT_FROM_EMAIL
         sync: false
       - key: DEFAULT_FROM_NAME
