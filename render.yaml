@@ -11,11 +11,11 @@ services:
       - key: MAIL_TRANSPORT
         value: resend
       - key: DEFAULT_FROM_EMAIL
-        sync: false
+        value: onboarding@resend.dev
       - key: DEFAULT_FROM_NAME
         value: Serendipity HR
       - key: DEFAULT_REPLY_TO
-        sync: false
+        value: onboarding@resend.dev
       - key: EMPLOYEE_FRONTEND_BASE_URL
         value: https://serendipity-smpc.vercel.app
       - key: ADMIN_FRONTEND_BASE_URL
