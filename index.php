@@ -166,6 +166,18 @@ try {
             ]);
             break;
 
+        case 'brevo':
+            sendWithBrevo($config, [
+                'to' => $to,
+                'subject' => $subject,
+                'html' => $html,
+                'text' => $text,
+                'from_email' => $fromEmail,
+                'from_name' => $fromName,
+                'reply_to' => $replyTo,
+            ]);
+            break;
+
         case 'smtp':
             sendWithSmtp($config, [
                 'to' => $to,
@@ -181,7 +193,7 @@ try {
         default:
             respond(500, [
                 'success' => false,
-                'error' => 'Unsupported transport configured. Use "smtp" or "resend".',
+                'error' => 'Unsupported transport configured. Use "smtp", "resend", or "brevo".',
             ]);
     }
 
@@ -228,6 +240,44 @@ function sendWithResend(array $config, array $message): void
         'https://api.resend.com/emails',
         [
             'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json',
+        ],
+        $body
+    );
+}
+
+function sendWithBrevo(array $config, array $message): void
+{
+    $apiKey = trim((string) ($config['brevo_api_key'] ?? ''));
+    if ($apiKey === '') {
+        throw new RuntimeException('Missing brevo_api_key in application configuration.');
+    }
+
+    $body = [
+        'sender' => [
+            'name' => $message['from_name'],
+            'email' => $message['from_email'],
+        ],
+        'to' => [
+            [
+                'email' => $message['to'],
+            ]
+        ],
+        'subject' => $message['subject'],
+        'htmlContent' => $message['html'],
+        'textContent' => $message['text'],
+    ];
+
+    if ($message['reply_to'] !== '') {
+        $body['replyTo'] = [
+            'email' => $message['reply_to'],
+        ];
+    }
+
+    requestJson(
+        'https://api.brevo.com/v3/smtp/email',
+        [
+            'api-key: ' . $apiKey,
             'Content-Type: application/json',
         ],
         $body
@@ -820,6 +870,18 @@ function sendPasswordResetEmail(array $config, string $email, string $resetToken
             ]);
             break;
 
+        case 'brevo':
+            sendWithBrevo($config, [
+                'to' => $email,
+                'subject' => $subject,
+                'html' => $html,
+                'text' => $text,
+                'from_email' => normalizeEmail($config['default_from_email'] ?? ''),
+                'from_name' => trim((string) ($config['default_from_name'] ?? 'Serendipity HR')), 
+                'reply_to' => normalizeEmail($config['default_reply_to'] ?? ''),
+            ]);
+            break;
+
         case 'smtp':
             sendWithSmtp($config, [
                 'to' => $email,
@@ -833,7 +895,7 @@ function sendPasswordResetEmail(array $config, string $email, string $resetToken
             break;
 
         default:
-            throw new RuntimeException('Unsupported transport configured. Use "smtp" or "resend".');
+            throw new RuntimeException('Unsupported transport configured. Use "smtp", "resend", or "brevo".');
     }
 }
 
@@ -873,6 +935,18 @@ function sendSignupVerificationEmail(array $config, array $data): void
             ]);
             return;
 
+        case 'brevo':
+            sendWithBrevo($config, [
+                'to' => $data['email'],
+                'subject' => $subject,
+                'html' => $html,
+                'text' => $text,
+                'from_email' => normalizeEmail($config['default_from_email'] ?? ''),
+                'from_name' => trim((string) ($config['default_from_name'] ?? 'Serendipity HR')),
+                'reply_to' => normalizeEmail($config['default_reply_to'] ?? ''),
+            ]);
+            return;
+
         case 'smtp':
             sendWithSmtp($config, [
                 'to' => $data['email'],
@@ -886,7 +960,7 @@ function sendSignupVerificationEmail(array $config, array $data): void
             return;
 
         default:
-            throw new RuntimeException('Unsupported transport configured. Use "smtp" or "resend".');
+            throw new RuntimeException('Unsupported transport configured. Use "smtp", "resend", or "brevo".');
     }
 }
 
@@ -930,6 +1004,18 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
             ]);
             return;
 
+        case 'brevo':
+            sendWithBrevo($config, [
+                'to' => $employee['email'],
+                'subject' => $subject,
+                'html' => $html,
+                'text' => $text,
+                'from_email' => normalizeEmail($config['default_from_email'] ?? ''),
+                'from_name' => trim((string) ($config['default_from_name'] ?? 'Serendipity HR')),
+                'reply_to' => normalizeEmail($config['default_reply_to'] ?? ''),
+            ]);
+            return;
+
         case 'smtp':
             sendWithSmtp($config, [
                 'to' => $employee['email'],
@@ -943,7 +1029,7 @@ function sendSignupConfirmationEmail(array $config, array $employee): void
             return;
 
         default:
-            throw new RuntimeException('Unsupported transport configured. Use "smtp" or "resend".');
+            throw new RuntimeException('Unsupported transport configured. Use "smtp", "resend", or "brevo".');
     }
 }
 
@@ -1276,6 +1362,7 @@ function loadConfig(): array
             'ehlo_host' => envValue('SMTP_EHLO_HOST', (string) (($fileConfig['smtp']['ehlo_host'] ?? 'localhost'))),
         ],
         'resend_api_key' => envValue('RESEND_API_KEY', (string) ($fileConfig['resend_api_key'] ?? '')),
+        'brevo_api_key' => envValue('BREVO_API_KEY', (string) ($fileConfig['brevo_api_key'] ?? '')),
     ];
 }
 

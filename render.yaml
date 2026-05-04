@@ -9,7 +9,7 @@ services:
       - key: SHARED_API_KEY
         sync: false
       - key: MAIL_TRANSPORT
-        value: resend
+        value: brevo
       - key: DEFAULT_FROM_EMAIL
         value: onboarding@resend.dev
       - key: DEFAULT_FROM_NAME
@@ -46,5 +46,5 @@ services:
         value: "30"
       - key: SMTP_EHLO_HOST
         value: localhost
-      - key: RESEND_API_KEY
-        value: re_RmwBL4cY_2CaNEBseeQGb5cby4XBTxE4e
+      - key: BREVO_API_KEY
+        sync: false
