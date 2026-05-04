@@ -47,4 +47,4 @@ services:
       - key: SMTP_EHLO_HOST
         value: localhost
       - key: RESEND_API_KEY
-        sync: false
+        value: re_RmwBL4cY_2CaNEBseeQGb5cby4XBTxE4e
