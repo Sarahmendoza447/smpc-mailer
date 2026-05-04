@@ -11,7 +11,7 @@ services:
       - key: MAIL_TRANSPORT
         value: brevo
       - key: DEFAULT_FROM_EMAIL
-        value: sarahmendoza447@gmail.com
+        value: serendipityhr2026@gmail.com
       - key: DEFAULT_FROM_NAME
         value: Serendipity HR
       - key: DEFAULT_REPLY_TO
