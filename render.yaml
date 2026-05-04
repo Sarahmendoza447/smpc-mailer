@@ -15,7 +15,7 @@ services:
       - key: DEFAULT_FROM_NAME
         value: Serendipity HR
       - key: DEFAULT_REPLY_TO
-        value: onboarding@resend.dev
+        value: serendipityhr2026@gmail.com
       - key: EMPLOYEE_FRONTEND_BASE_URL
         value: https://serendipity-smpc.vercel.app
       - key: ADMIN_FRONTEND_BASE_URL
