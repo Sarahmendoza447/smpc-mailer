@@ -840,7 +840,7 @@ function generateTemporaryPassword(int $length = 12): string
 function sendPasswordResetEmail(array $config, string $email, string $resetToken, string $accountType = 'admin'): void
 {
     $frontendBaseUrl = frontendBaseUrlForAccount($config, $accountType);
-    $resetPath = $accountType === 'user' ? '/reset-password?token=' : '/?reset_token=';
+    $resetPath = '/?reset_token=';
     $resetUrl = $frontendBaseUrl . $resetPath . urlencode($resetToken);
     $subject = $accountType === 'user' ? 'Serendipity Password Reset' : 'Serendipity Admin Password Reset';
     $text = "A password reset request was received for your account.\n\n"
